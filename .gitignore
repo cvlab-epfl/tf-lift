@@ -1,0 +1,9 @@
+.pyc
+logs
+*.pyc
+*__pycache__*
+*.dll
+*.tfrecords
+*.h5
+test/
+gpupy
