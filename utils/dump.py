@@ -33,7 +33,7 @@ import os
 import h5py
 import tensorflow as tf
 
-from utils.legacy import load_legacy_network
+# from utils.legacy import load_legacy_network
 
 # Some constant strings
 best_val_loss_filename = "best_val_loss.h5"
@@ -145,7 +145,7 @@ def restore_network(supervisor, subtask):
     # Check if pretrain weight file is specified
     predir = getattr(supervisor.config, "pretrained_{}".format(subtask))
     # Try loading the old weights
-    is_loaded += load_legacy_network(supervisor, subtask, predir)
+    # is_loaded += load_legacy_network(supervisor, subtask, predir)
     # Try loading the tensorflow weights
     is_loaded += load_network(supervisor, subtask, predir)
 

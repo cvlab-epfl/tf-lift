@@ -39,7 +39,7 @@ from six.moves import xrange
 from utils import (eval_descs, eval_kps, get_patch_size, get_patch_size_no_aug,
                    get_tensor_shape, image_summary_nhwc, make_theta,
                    show_all_variables)
-from utils.legacy import build_legacy
+# from utils.legacy import build_legacy
 
 
 class Network(object):
@@ -95,7 +95,7 @@ class Network(object):
 
         # Build the legacy component. This is only used for accessing old
         # framework weights. You can safely ignore this part
-        build_legacy(self)
+        # build_legacy(self)
 
         # Show all variables in the network
         show_all_variables()
