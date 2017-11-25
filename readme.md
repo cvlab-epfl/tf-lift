@@ -6,11 +6,13 @@
 
 Python Version : 3
 OpenCV Version : 3
+CUDA Version: 8.0(later)
 
 You'll need to install the dependencies, something like the following:
+(Since all the code are running at python3 setting, so the pip3 is used to install the packages)
 
 ```
-pip install numpy h5py tensorflow tensorflow-gpu
+pip3 install numpy h5py tensorflow tensorflow-gpu
 
 ```
 We will later provide a requirements.txt for you to use with `pip`.
