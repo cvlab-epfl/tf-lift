@@ -31,6 +31,7 @@
 
 import os
 import sys
+import platform
 
 import numpy as np
 import tensorflow as tf
@@ -74,6 +75,25 @@ if __name__ == "__main__":
 
     if len(unparsed) > 0:
         raise RuntimeError("Unknown arguments were given! Check the command line!")
+
+    # Alias to bypass the scratch drive
+    # Also if in Canada
+    username = getpass.getuser()
+
+    # environment variables are non-portable black magic
+    host = platform.node()
+    print("User and hostname: {}@{}".format(username, host))
+
+    if "gra" in host or "cedar" in host or "cdr" in host:
+        print('Forcing remote folders for Compute Canada nodes'.format(username))
+        config.data_dir = "/scratch/{}/Datasets/".format(username)
+        config.temp_dir = "/scratch/{}/Temp/".format(username)
+        config.scratch_dir = "/scratch/{}/Temp/".format(username)
+    elif not config.use_local:
+        print('Forcing remote folders for user "{}"'.format(username))
+        config.data_dir = "/cvlabdata2/home/{}/Datasets/".format(username)
+        config.temp_dir = "/cvlabdata2/home/{}/Temp/".format(username)
+        config.scratch_dir = "/cvlabdata2/home/{}/Temp/".format(username)
 
     tf.app.run(main=main, argv=[sys.argv[0]] + unparsed)
 

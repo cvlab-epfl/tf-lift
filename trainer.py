@@ -69,9 +69,6 @@ class Trainer(object):
 
         # Create the dataset instance
         self.dataset = Dataset(self.config, rng)
-        # import IPython
-        # IPython.embed()
-        # Create the model instance
         self.network = Network(self.sess, self.config, self.dataset)
         # Make individual saver instances and summary writers for each module
         self.saver = {}
@@ -85,9 +82,11 @@ class Trainer(object):
                     self.saver[_key] = tf.train.Saver(
                         self.network.allparams[_key])
         # Summary Writer
+        # Disable this, it's too big
         self.summary_writer[self.config.subtask] = tf.summary.FileWriter(
             os.path.join(self.config.logdir, self.config.subtask),
-            graph=self.sess.graph)
+            # graph=self.sess.graph
+        )
         # validation loss
         self.best_val_loss[self.config.subtask] = np.inf
         # step for each module
@@ -114,6 +113,13 @@ class Trainer(object):
         print("-------------------------------------------------")
         print(" Training ")
         print("-------------------------------------------------")
+
+        # Sanity check: no BN when training keypoints
+        # if self.config.substask == "kp" or (
+        #     self.config.subtask == "joint" and
+        #         "kp" in self.config.finetune):
+        #     raise RuntimeError("Training keypoints with Batch Normalization"
+        #                        "enabled is not allowed.")
 
         subtask = self.config.subtask
         batch_size = self.config.batch_size
@@ -153,6 +159,7 @@ class Trainer(object):
             do_validation = step % self.config.validation_interval == 0
             cur_summary = self.network.backward(
                 subtask, cur_data, provide_summary=do_validation)
+
             if do_validation and cur_summary is not None:
                 # Make sure we have the summary data
                 assert cur_summary is not None

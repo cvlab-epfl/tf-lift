@@ -125,5 +125,24 @@ def loss_desc_non_pair(d1, d3, margin, d2=None):
         return tf.nn.relu(margin - pair_dist_1_to_3)
 
 
+def loss_desc_triplet(d1, d2, d3, margin, squared_loss=False, mine_negative=False):
+    """Triplet loss.
+
+    """
+
+    d_pos = tf.sqrt(tf.reduce_sum(tf.square(d1 - d2), axis=1))
+    pair_dist_1_to_3 = tf.sqrt(tf.reduce_sum(tf.square(d1 - d3), axis=1))
+    if mine_negative:
+        pair_dist_2_to_3 = tf.sqrt(tf.reduce_sum(tf.square(d2 - d3), axis=1))
+        d_neg = tf.minimum(pair_dist_1_to_3, pair_dist_2_to_3)
+    else:
+        d_neg = pair_dist_1_to_3
+
+    if squared_loss:
+        return tf.nn.relu(tf.square(d_pos) - tf.square(d_neg) + margin)
+    else:
+        return tf.nn.relu(d_pos - d_neg + margin)
+
+
 #
 # losses.py ends here

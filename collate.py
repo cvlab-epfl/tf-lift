@@ -16,9 +16,12 @@ def look_for_checkpoints(folder, task):
             cp = tf.train.latest_checkpoint(join(folder, d))
             if cp is not None:
                 # Load best validation result
-                r = loadh5(join(folder, d, 'best_val_loss.h5'))[d]
-                s = loadh5(join(folder, d, 'step.h5'))[d]
-                print('{0:s} -> {1:.05f} [{2:d}]'.format(join(folder, d), r, s))
+                try:
+                    r = loadh5(join(folder, d, 'best_val_loss.h5'))[d]
+                    s = loadh5(join(folder, d, 'step.h5'))[d]
+                    print('{0:s} -> {1:.05f} [{2:d}]'.format(join(folder, d), r, s))
+                except:
+                    print("Could not open '{}' for '{}'".format(d, folder))
         else:
             look_for_checkpoints(join(folder, d), task)
 

@@ -33,6 +33,7 @@ import numpy as np
 import tensorflow as tf
 import tensorflow.contrib.layers as tcl
 
+from six.moves import xrange
 from utils import get_tensor_shape, get_W_b_conv2d, get_W_b_fc
 
 
@@ -225,6 +226,25 @@ def pool_max(inputs, ksize, stride, padding, data_format="NHWC"):
     )
 
 
+def pool_avg(inputs, ksize, stride, padding, data_format="NHWC"):
+    """max pooling, NHWC"""
+
+    if data_format == "NHWC":
+        ksizes = [1, ksize, ksize, 1]
+        strides = [1, stride, stride, 1]
+    else:
+        ksizes = [1, 1, ksize, ksize]
+        strides = [1, 1, stride, stride]
+
+    return tf.nn.avg_pool(
+        inputs,
+        ksize=ksizes,
+        strides=strides,
+        padding=padding,
+        data_format=data_format,
+    )
+
+
 def conv_2d(inputs, ksize, nchannel, stride, padding, data_format="NHWC"):
     """conv 2d, NHWC"""
 
@@ -240,6 +260,44 @@ def conv_2d(inputs, ksize, nchannel, stride, padding, data_format="NHWC"):
         padding=padding, data_format=data_format)
 
     return tf.nn.bias_add(conv, b, data_format=data_format)
+
+
+def conv_2d_trans(inputs, ksize, nchannel, stride, padding, data_format="NHWC"):
+    """conv 2d, transposed, NHWC"""
+
+    assert(padding == "VALID")
+
+    inshp = tf.shape(inputs)
+    if data_format == "NHWC":
+        fanin = get_tensor_shape(inputs)[-1]
+        strides = [1, stride, stride, 1]
+        output_shape = tf.stack(
+            [inshp[0],
+             inshp[1] * int(stride),  # + max(ksize - stride, 0),
+             inshp[2] * int(stride),  # + max(ksize - stride, 0),
+             nchannel])
+    else:
+        fanin = get_tensor_shape(inputs)[1]
+        strides = [1, 1, stride, stride]
+        output_shape = tf.stack(
+            [inshp[0],
+             nchannel,
+             inshp[2] * int(stride),  # + max(ksize - stride, 0),
+             inshp[3] * int(stride),  # + max(ksize - stride, 0)
+             ])
+
+    with tf.variable_scope("W"):
+        W, _ = get_W_b_conv2d(ksize=ksize, fanin=nchannel, fanout=fanin)
+    with tf.variable_scope("b"):
+        _, b = get_W_b_conv2d(ksize=ksize, fanin=fanin, fanout=nchannel)
+
+    deconv2dres = tf.nn.conv2d_transpose(
+        inputs, W, output_shape, strides=strides, padding=padding,
+        data_format=data_format)
+
+    deconv2dres = tf.reshape(deconv2dres, output_shape)
+
+    return tf.nn.bias_add(deconv2dres, b, data_format=data_format)
 
 
 def fc(inputs, fanout):
@@ -311,6 +369,187 @@ def ghh(inputs, num_in_sum, num_in_max, data_format="NHWC"):
     ], axis=pool_axis)
 
     return cur_in
+
+
+def crop_and_concat(x1, x2):
+    """ Crop x1 as size x2 and concat """
+    x1_shape = tf.shape(x1)
+    x2_shape = tf.shape(x2)
+    # x1_shape = [_s if _s is not None else -
+    #             1 for _s in x1.get_shape().as_list()]
+    # x2_shape = [_s if _s is not None else -
+    #             1 for _s in x2.get_shape().as_list()]
+    # offsets for the top left corner of the crop
+    offsets = [0,
+               (x1_shape[1] - x2_shape[1]) // 2,
+               (x1_shape[2] - x2_shape[2]) // 2,
+               0]
+    size = [-1, x2_shape[1], x2_shape[2], -1]
+    x1_crop = tf.slice(x1, offsets, size)
+    # return tf.concat(3, [x1_crop, x2])
+    return tf.concat([x1_crop, x2], axis=3)
+
+
+def conv2d_unet(x, n_class, is_training, layers=3, features_root=16,
+                filter_size=4, pool_size=2, max_features=512,
+                pool_method="stride", padding="VALID",
+                last_activation_fn=None, init_stddev=0.02,
+                data_format="NHWC"):
+    """
+    Creates a new convolutional unet for the given parametrization.
+
+    :param x: input tensor, shape [?,nx,ny,channels]
+    :param channels: number of channels in the input image
+    :param n_class: number of output labels
+    :param layers: number of layers in the net
+    :param features_root: number of features in the first layer
+    :param filter_size: size of the convolution filter
+    :param pool_size: size of the max pooling operation
+    :param summaries: Flag if summaries should be created
+    """
+
+    in_node = x
+
+    if pool_method == "stride":
+        stride = 2
+    else:
+        raise NotImplementedError("TODO")
+
+    dw_convs = {}
+
+    # Initial convolution (no residual here, no activation)
+    with tf.variable_scope("initconv"):
+        in_node = conv_2d(
+            in_node, ksize=filter_size,
+            nchannel=features_root,
+            stride=1,
+            padding=padding,
+            data_format=data_format,
+        )
+        # in_node = batch_norm(in_node, is_training)
+        # in_node = tf.nn.relu(in_node)
+    print("Input---")
+    print("output shape = {}".format(in_node.get_shape()))
+
+    # Original input as -1 dw_h_conv layer
+    dw_convs[-1] = in_node
+
+    # layer n with have num_features[n] channels as output
+    num_features = {}
+    for layer in xrange(-1, layers):
+        num_features[layer] = int(
+            min(max_features, 2**(layer + 1) * features_root))
+    # num_features[layers - 1] = num_features[layers - 2]
+
+    # down layers
+    print("Conv down---")
+    with tf.variable_scope("convdown"):
+        for layer in range(0, layers):
+            with tf.variable_scope("level" + str(layer)):
+                features_out = num_features[layer]
+                # Bn-relu-conv
+                in_node = batch_norm(in_node, is_training)
+                in_node = tf.nn.relu(in_node)
+                # Conv with strides instead of pooling!
+                # in_node = conv_2d(
+                #     in_node, ksize=stride,
+                #     nchannel=features_out,
+                #     stride=stride,
+                #     padding=padding,
+                #     data_format=data_format,
+                # )
+                in_node = conv_2d(
+                    in_node, ksize=stride,
+                    nchannel=features_out,
+                    stride=1,
+                    padding=padding,
+                    data_format=data_format,
+                )
+                in_node = pool_avg(
+                    in_node,
+                    ksize=2,
+                    stride=2,
+                    padding=padding,
+                    data_format=data_format,
+                )
+
+                dw_convs[layer] = in_node
+
+            print("output shape = {}".format(dw_convs[layer].get_shape()))
+
+    in_node = dw_convs[layers - 1]
+
+    # up layers
+    print("Conv up---")
+    with tf.variable_scope("convup"):
+        # from layers -2 to -1
+        for layer in range(layers - 2, -2, -1):
+            # print(layer)
+            with tf.variable_scope("level" + str(layer)):
+                # features_in = num_features[layer + 1]
+                features_out = num_features[layer]
+                # # Unpool if necessary
+                # if pool_method != "stride":
+                #     with tf.variable_scope("unpool"):
+                #         in_node = conv_2d_trans(
+                #             in_node, ksize=filter_size,
+                #             nchannel=features_in,
+                #             stride=stride,
+                #             padding=padding,
+                #             data_format=data_format,
+                #         )
+
+                # Perform deconv
+                with tf.variable_scope("deconv"):
+                    in_node = batch_norm(in_node, is_training)
+                    in_node = tf.nn.relu(in_node)
+                    in_node = conv_2d_trans(
+                        in_node, ksize=filter_size,
+                        nchannel=features_out,
+                        stride=stride,
+                        padding=padding,
+                        data_format=data_format,
+                    )
+
+                # Bring in skip connections
+                in_node = crop_and_concat(
+                    dw_convs[layer], in_node)
+
+                # mark that the features_in is now doubled
+                # features_in = num_features[layer + 1] + num_features[layer]
+
+                # Convolve with skip connections
+                with tf.variable_scope("conv"):
+                    in_node = batch_norm(in_node, is_training)
+                    in_node = tf.nn.relu(in_node)
+                    in_node = conv_2d(
+                        in_node, ksize=filter_size,
+                        nchannel=features_out,
+                        stride=1,
+                        padding=padding,
+                        data_format=data_format,
+                    )
+
+                print("output shape = {}".format(in_node.get_shape()))
+
+    # Final convolution (no activation, no residual)
+    with tf.variable_scope("lastconv"):
+        # Do a batch normalization before the final, just as we did for input
+        with tf.variable_scope("last-pre-bn"):
+            in_node = batch_norm(in_node, is_training)
+        # Then do the proper thing
+        in_node = conv_2d(
+            in_node, ksize=1,
+            nchannel=n_class,
+            stride=1,
+            padding=padding,
+            data_format=data_format,
+        )
+        print("output shape = {}".format(in_node.get_shape()))
+
+    output_map = in_node
+
+    return output_map
 
 #
 # layers.py ends here

@@ -62,6 +62,8 @@ class Dataset(object):
         if self.config.data_type == "chalmers":
             if self.config.data_name == "oxford":
                 self.th_dist = 2e-3
+            elif self.config.data_name == "oxford2":
+                self.th_dist = 5e-3
             else:
                 raise RuntimeError(
                     "Unknown data_name: '{}'".format(
@@ -224,14 +226,30 @@ class Dataset(object):
             self.LUT_kp[task] = {}
             self.LUT_nonkp[task] = {}
             if hasattr(self, "th_dist"):
-                self.LUT_below_th[task] = {}
-                # Build list of indices
-                dist_idx_reverse = np.zeros(
-                    self.data[task]["ID"].max() + 1,
-                    dtype=np.int64)
-                dist_idx_reverse[self.data[task]["dist_idx"]] = range(
-                    1, self.data[task]["dist_idx"].size + 1)
-                dist_idx_reverse -= 1
+                if self.data[task]["dist_idx"]:
+                    self.LUT_below_th[task] = {}
+                    # Build list of indices
+                    dist_idx_reverse = np.zeros(
+                        self.data[task]["ID"].max() + 1,
+                        dtype=np.int64)
+                    dist_idx_reverse[self.data[task]["dist_idx"]] = range(
+                        1, self.data[task]["dist_idx"].size + 1)
+                    dist_idx_reverse -= 1
+                    self.has_distmat = True
+                else:
+                    self.has_distmat = False
+
+                # Retrieve coordinates if necessary
+                if not self.has_distmat:
+                    if not hasattr(self, 'points'):
+                        self.points = {}
+                    fn = self.config.data_dir + '/' + \
+                        self.config.data_type + '/' + \
+                        self.config.data_name + '/' + \
+                        self.config.data_name + '.h5'
+                    with h5py.File(fn, 'r') as f:
+                        self.points = f['points'].value
+
             # Argsort the ID
             print("[{}] sorting IDs...".format(task))
             ID = self.data[task]["ID"]
@@ -254,12 +272,13 @@ class Dataset(object):
                     else:
                         self.LUT_kp[task][start_ID] = ind[start:end]
                         if hasattr(self, "th_dist"):
-                            v = dist_idx_reverse[start_ID]
-                            assert v >= 0, "Invalid index"
-                            d = self.data[task]["dist_mat"][v]
-                            # 3D points are 1-indexed
-                            self.LUT_below_th[task][start_ID] = 1 + \
-                                np.where((d > 0) & (d < self.th_dist))[0]
+                            if self.has_distmat:
+                                v = dist_idx_reverse[start_ID]
+                                assert v >= 0, "Invalid index"
+                                d = self.data[task]["dist_mat"][v]
+                                # 3D points are 1-indexed
+                                self.LUT_below_th[task][start_ID] = 1 + \
+                                    np.where(d > self.th_dist)[0]
                     # Update start position
                     start = end
                     start_ID = ID[ind[start]]
@@ -298,8 +317,19 @@ class Dataset(object):
             valid_keys -= set([_kp])
             # Remove points below the distance threshold
             if hasattr(self, "th_dist"):
-                valid_keys -= set(valid_keys.intersection(
-                    self.LUT_below_th[task][_kp]))
+                if self.has_distmat:
+                    valid_keys -= set(valid_keys.intersection(
+                        self.LUT_below_th[task][_kp]))
+                else:
+                    # Recompute distances for every 3D point
+                    xyz = self.points[_kp - 1]
+                    d_sq = np.sum((xyz[None, ...].repeat(self.points.shape[
+                        0], axis=0) - self.points) ** 2, axis=1)
+                    valid_keys -= set(1 + np.where(d_sq < self.th_dist**2)[0])
+                    if len(valid_keys) == 0:
+                        print('Should never be here')
+                        import IPython
+                        IPython.embed()
 
             _kp2 = self.rng.choice(list(valid_keys))
             P3 = self.rng.choice(self.LUT_kp[task][_kp2], 1)[0]

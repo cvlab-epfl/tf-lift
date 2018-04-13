@@ -30,6 +30,7 @@
 
 
 import time
+import os
 
 import cv2
 import h5py
@@ -41,7 +42,7 @@ from networks.lift import Network
 from six.moves import xrange
 from utils import (IDX_ANGLE, XYZS2kpList, draw_XYZS_to_img, get_patch_size,
                    get_ratio_scale, get_XYZS_from_res_list, restore_network,
-                   saveh5, saveKpListToTxt, update_affine)
+                   saveh5, saveKpListToTxt, update_affine, loadh5)
 
 
 class Tester(object):
@@ -65,8 +66,19 @@ class Tester(object):
 
         # Create the dataset instance
         self.dataset = Dataset(self.config, rng)
-        # Create the model instance
-        self.network = Network(self.sess, self.config, self.dataset)
+        # Retrieve mean/std (yes it is hacky)
+        logdir = os.path.join(self.config.logdir, self.config.subtask)
+        if os.path.exists(os.path.join(logdir, "mean.h5")):
+            training_mean = loadh5(os.path.join(logdir, "mean.h5"))
+            training_std = loadh5(os.path.join(logdir, "std.h5"))
+            print("[{}] Loaded input normalizers for testing".format(
+                self.config.subtask))
+
+            # Create the model instance
+            self.network = Network(self.sess, self.config, self.dataset, {
+                                   'mean': training_mean, 'std': training_std})
+        else:
+            self.network = Network(self.sess, self.config, self.dataset)
         # Make individual saver instances for each module.
         self.saver = {}
         self.best_val_loss = {}
@@ -128,7 +140,8 @@ class Tester(object):
         max_scale_log2 = self.config.test_max_scale_log2
         # Test starting with double scale if small image
         min_hw = np.min(image_gray.shape[:2])
-        if min_hw <= 1600:
+        # for the case of testing on same scale, do not double scale
+        if min_hw <= 1600 and min_scale_log2!=max_scale_log2:
             print("INFO: Testing double scale")
             min_scale_log2 -= 1
         # range of scales to check
@@ -147,7 +160,8 @@ class Tester(object):
         # if there are invalid scales and resizes
         if not np.prod(is_resize_valid):
             # find first invalid
-            first_invalid = np.where(True - is_resize_valid)[0][0]
+            # first_invalid = np.where(True - is_resize_valid)[0][0]
+            first_invalid = np.where(~is_resize_valid)[0][0]
 
             # remove scales from testing
             scales_to_test = scales_to_test[:first_invalid]
@@ -235,6 +249,8 @@ class Tester(object):
         print("Performing NMS")
         start_time = time.clock()
         res_list = test_res_list
+        # check whether the return result for socre is right
+#        print(res_list[0][400:500,300:400])
         XYZS = get_XYZS_from_res_list(
             res_list, resize_to_test, scales_to_test, nearby, edge_th,
             scl_intv, nms_intv, do_interpolation=True,
@@ -345,6 +361,9 @@ class Tester(object):
         ))
         total_time += load_time
 
+        # import IPython
+        # IPython.embed()
+
         # -------------------------------------------------------------------------
         # Test using the test function
         start_time = time.clock()
@@ -357,9 +376,14 @@ class Tester(object):
         total_time += compute_time
         print("Total time for descriptor is {} ms".format(total_time))
 
-        # save as h5 file
+        # Overwrite angle
+        kps = cur_data["kps"].copy()
+        kps[:, 3] = cur_data["angle"][:, 0]
+
+        # Save as h5 file
         save_dict = {}
-        save_dict['keypoints'] = cur_data["kps"]
+        # save_dict['keypoints'] = cur_data["kps"]
+        save_dict['keypoints'] = kps
         save_dict['descriptors'] = descs
 
         saveh5(save_dict, self.config.test_out_file)

@@ -75,7 +75,8 @@ def process(inputs, bypass, name, skip, config, is_training):
         nm = 4
         cur_in = conv_2d(
             cur_in, config.kp_filter_size, nu * ns * nm, 1, "VALID")
-        # batch norm on the output of convolutions!
+        # Disable batch norm: does not make sense for testing
+        # as we run on the whole image rather than a collection of patches
         # if config.use_batch_norm:
         #     cur_in = batch_norm(cur_in, training=is_training)
         cur_in = ghh(cur_in, ns, nm)

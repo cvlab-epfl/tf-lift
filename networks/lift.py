@@ -31,9 +31,11 @@ import importlib
 
 import numpy as np
 import tensorflow as tf
+from time import time
+from tqdm import tqdm
 
 from losses import (loss_classification, loss_desc_non_pair, loss_desc_pair,
-                    loss_overlap)
+                    loss_desc_triplet, loss_overlap)
 from modules.spatial_transformer import transformer as transformer
 from six.moves import xrange
 from utils import (eval_descs, eval_kps, get_patch_size, get_patch_size_no_aug,
@@ -50,7 +52,7 @@ class Network(object):
 
     """
 
-    def __init__(self, sess, config, dataset):
+    def __init__(self, sess, config, dataset, force_mean_std=None):
         # Save pointer to the tensorflow session
         self.sess = sess
         # Save pointer to config
@@ -64,17 +66,65 @@ class Network(object):
         # Currently normalized to be between -1 and 1
         self.mean = {}
         self.std = {}
-        for _module in ["kp", "ori", "desc"]:
-            self.mean[_module] = 128.0
-            self.std[_module] = 128.0
-
-        if self.config.use_old_mean_std:
+        # Load values if they already exist
+        if force_mean_std:
+            self.mean = force_mean_std["mean"]
+            self.std = force_mean_std["std"]
+        elif self.config.mean_std_type == "hardcoded":
+            print("-- Using default values for mean/std")
+            for _module in ["kp", "ori", "desc"]:
+                self.mean[_module] = 128.0
+                self.std[_module] = 128.0
+        elif self.config.mean_std_type == "old":
+            print("-- Using old (piccadilly) values for mean/std")
             self.mean["kp"] = 116.4368117568544249706974369473755359649658203125
             self.std["kp"] = 88.083076379771597430590190924704074859619140625
             self.mean["ori"] = 116.4368117568544249706974369473755359649658203125
             self.std["ori"] = 88.083076379771597430590190924704074859619140625
             self.mean["desc"] = 110.75389862060546875
             self.std["desc"] = 61.53688812255859375
+        elif self.config.mean_std_type == "dataset":
+            t = time()
+            print("-- Recomputing dataset mean/std...")
+            # Account for augmented sets
+            if self.config.use_augmented_set:
+                b = int((get_patch_size(config) -
+                         get_patch_size_no_aug(config)) / 2)
+            else:
+                b = 0
+
+            if b > 0:
+                _d = self.dataset.data["train"]["patch"][:, :, b:-b, b:-b]
+            else:
+                _d = self.dataset.data["train"]["patch"][:, :, :, :]
+
+            # Do this incrementally to avoid memory problems
+            jump = 1000
+            data_mean = np.zeros(_d.shape[0])
+            data_std = np.zeros(_d.shape[0])
+            for i in tqdm(range(0, _d.shape[0], jump)):
+                data_mean[i:i + jump] = _d[i:i + jump].mean()
+                data_std[i:i + jump] = _d[i:i + jump].std()
+            data_mean = data_mean.mean()
+            data_std = data_std.mean()
+            print('-- Dataset mean: {0:.03f}, std = {1:.03f}'.format(data_mean, data_std))
+
+            for _module in ["kp", "ori", "desc"]:
+                self.mean[_module] = data_mean
+                self.std[_module] = data_std
+            print("-- Done in {0:.02f} sec".format(time() - t))
+        elif self.config.mean_std_type == "batch":
+            t = time()
+            print("-- Will recompute mean/std per batch...")
+        elif self.config.mean_std_type == "sample":
+            t = time()
+            print("-- Will recompute mean/std per sample...")
+        elif self.config.mean_std_type == "sequence":
+            t = time()
+            print("-- Will recompute mean/std per sequence...")
+            raise RuntimeError("TODO")
+        else:
+            raise RuntimeError("Unknown mean-std strategy")
 
         # Account for the keypoint scale change while augmenting rotations
         self.scale_aug = float(get_patch_size(self.config)) / \
@@ -351,7 +401,7 @@ class Network(object):
         # For Image based test
         self.inputs["img"] = {"img": tf.placeholder(
             tf.float32, shape=[
-                None, None, None, nchannel
+                1, None, None, nchannel
             ], name="img",
         )}
 
@@ -439,15 +489,15 @@ class Network(object):
             )
 
             # For image based test
-            # self._build_module(
-            #     module="kp",
-            #     inputs=self.inputs["img"],
-            #     bypass=self.inputs["img"],  # This is a dummy
-            #     names=["img"],
-            #     skip=subtask != "kp",
-            #     reuse=True,
-            #     test_only=True,
-            # )
+            self._build_module(
+                module="kp",
+                inputs=self.inputs["img"],
+                bypass=self.inputs["img"],  # This is a dummy
+                names=["img"],
+                skip=subtask != "kp",
+                reuse=True,
+                test_only=True,
+            )
 
             # ----------------------------------------
             # The Crop Spatial Transformer
@@ -516,7 +566,8 @@ class Network(object):
                 #     1 / self.scale_aug,
                 #     transpose=False,
                 #     names=["P1", "P2", "P3"])
-            elif self.config.use_augmented_set:
+            # elif self.config.use_augmented_set:
+            else:
                 rot = self.outputs["ori"]
                 # xyz_desc_scaled = self.transform_kp(
                 #     self.outputs["kp"],
@@ -525,8 +576,8 @@ class Network(object):
                 #     1 / self.scale_aug,
                 #     transpose=False,
                 #     names=["P1", "P2", "P3"])
-            else:
-                rot = None
+            # else:
+            #     rot = None
                 # xyz_desc_scaled = self.inputs["xyz"]
             self._build_st(
                 module="rot",
@@ -563,10 +614,19 @@ class Network(object):
             else:
                 cur_reuse = reuse
             with tf.variable_scope(module, reuse=cur_reuse) as sc:
-                cur_inputs = (
-                    (inputs[name] - self.mean[module]) /
-                    self.std[module]
-                )
+                if self.config.mean_std_type == 'batch':
+                    sample_mean, sample_std = tf.nn.moments(
+                        inputs[name], axes=(1, 2, 3), keep_dims=True)
+                    cur_inputs = (inputs[name] - sample_mean) / sample_std
+                elif self.config.mean_std_type == 'sample':
+                    sample_mean, sample_std = tf.nn.moments(
+                        inputs[name], axes=(0, 1, 2, 3), keep_dims=True)
+                    cur_inputs = (inputs[name] - sample_mean) / sample_std
+                else:
+                    cur_inputs = (
+                        (inputs[name] - self.mean[module]) /
+                        self.std[module]
+                    )
                 if test_only:
                     is_training = False
                 else:
@@ -724,6 +784,7 @@ class Network(object):
                 gt_pos2=gt2,
                 r_base=self.r_base,
             )
+
         with tf.variable_scope("kp-classification"):
             _loss_classification = loss_classification(
                 s1=self.outputs["kp"]["P1"]["score"],
@@ -731,13 +792,15 @@ class Network(object):
                 s3=self.outputs["kp"]["P3"]["score"],
                 s4=self.outputs["kp"]["P4"]["score"],
             )
+
         with tf.variable_scope("desc-pair"):
             _loss_desc_pair = loss_desc_pair(
                 d1=self.outputs["desc"]["P1"]["desc"],
                 d2=self.outputs["desc"]["P2"]["desc"],
             )
+
         with tf.variable_scope("desc-non-pair"):
-            if self.config.use_triplet_loss:
+            if self.config.use_hardest_anchor:
                 _loss_desc_non_pair = loss_desc_non_pair(
                     d1=self.outputs["desc"]["P1"]["desc"],
                     d2=self.outputs["desc"]["P2"]["desc"],
@@ -751,18 +814,34 @@ class Network(object):
                     margin=self.config.alpha_margin,
                 )
 
+        with tf.variable_scope("desc-triplet"):
+            _loss_desc_triplet = loss_desc_triplet(
+                d1=self.outputs["desc"]["P1"]["desc"],
+                d2=self.outputs["desc"]["P2"]["desc"],
+                d3=self.outputs["desc"]["P3"]["desc"],
+                margin=self.config.triplet_loss_margin,
+                mine_negative=self.config.use_hardest_anchor,
+            )
+
         # Loss for each task
         self.loss["kp"] = (
             self.config.alpha_overlap * _loss_overlap +
             self.config.alpha_classification * _loss_classification
         )
         self.loss["ori"] = _loss_desc_pair
-        self.loss["desc"] = _loss_desc_pair + _loss_desc_non_pair
-        self.loss["joint"] = (
-            self.config.alpha_kp * _loss_classification +
-            self.config.alpha_desc * _loss_desc_pair +
-            self.config.alpha_desc * _loss_desc_non_pair
-        )
+        if self.config.use_triplet_loss:
+            self.loss["desc"] = _loss_desc_triplet
+            self.loss["joint"] = (
+                self.config.alpha_kp * _loss_classification +
+                self.config.alpha_desc * _loss_desc_triplet
+            )
+        else:
+            self.loss["desc"] = _loss_desc_pair + _loss_desc_non_pair
+            self.loss["joint"] = (
+                self.config.alpha_kp * _loss_classification +
+                self.config.alpha_desc * _loss_desc_pair +
+                self.config.alpha_desc * _loss_desc_non_pair
+            )
 
         # Loss for weight decay
         #
@@ -792,7 +871,7 @@ class Network(object):
         elif optimizer == "rmsprop":
             optim = tf.train.RMSPropOptimizer(learning_rate)
         else:
-            raise Exception("[!] Unkown optimizer: {}".format(optimizer))
+            raise Exception("[!] Unknown optimizer: {}".format(optimizer))
 
         # All gradient computation should be done *after* the batchnorm update
         update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
@@ -864,7 +943,8 @@ class Network(object):
                 tf.summary.histogram(var.name + '/gradient', grad)
 
             # Make the optim op
-            self.optim[subtask] = optim.apply_gradients(grads_and_vars)
+            if len(grads_and_vars) > 0:
+                self.optim[subtask] = optim.apply_gradients(grads_and_vars)
 
     def _get_feed_dict(self, subtask, cur_data):
         """Returns feed_dict"""

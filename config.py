@@ -56,8 +56,10 @@ def add_argument_group(name):
 net_arg = add_argument_group("Network")
 net_arg.add_argument("--kp_input_size", type=int, default=48, help="")
 net_arg.add_argument("--kp_filter_size", type=int, default=25, help="")
+net_arg.add_argument("--kp2_num_layers", type=int, default=5, help="")
 net_arg.add_argument("--kp_base_scale", type=float, default=2.0, help="")
 net_arg.add_argument("--kp_com_strength", type=float, default=10.0, help="")
+net_arg.add_argument("--kp_num_fc_units", type=int, default=0, help="For module lift_kp_noghh")
 # net_arg.add_argument("--ori_input_size", type=int, default=28, help="")
 net_arg.add_argument("--ori_input_size", type=int, default=64, help="")
 net_arg.add_argument("--desc_input_size", type=int, default=64, help="")
@@ -85,10 +87,14 @@ net_arg.add_argument("--ori_activation", type=str, default="ghh", choices=["ghh"
 net_arg.add_argument("--desc_activ", type=str, default="relu", help="Descriptor activation")
 net_arg.add_argument("--desc_pool", type=str, default="avg_pool", help="Descriptor pooling")
 net_arg.add_argument("--use_subtractive_norm", type=str2bool, default=False, help="Descriptor subtractive normalization")
+net_arg.add_argument("--use_hardest_anchor", type=str2bool, default=True, help="Use hardest anchor")
 net_arg.add_argument("--use_triplet_loss", type=str2bool, default=True, help="Triplet loss")
+net_arg.add_argument("--triplet_loss_margin", type=float, default=5, help="Triplet loss margin")
 
 # Use old mean/std
-net_arg.add_argument("--use_old_mean_std", type=str2bool, default=False, help="")
+# net_arg.add_argument("--use_old_mean_std", type=str2bool, default=False, help="")
+net_arg.add_argument("--mean_std_type", type=str, default="hardcoded",
+                     choices=["hardcoded", "old", "dataset", "sample", "batch"], help="")
 
 # ----------------------------------------
 # Loss Function
@@ -106,6 +112,7 @@ loss_arg.add_argument("--kp_scoremap_softmax_strength",
 # ----------------------------------------
 # Data
 data_arg = add_argument_group("Data")
+data_arg.add_argument("--use_local", type=str2bool, default=True, help="")
 data_arg.add_argument("--nchannel", type=int, default=1, help="")
 data_arg.add_argument("--data_type", type=str, default="eccv2016", help="")
 data_arg.add_argument("--data_name", type=str, default="piccadilly", help="")
@@ -134,7 +141,7 @@ data_arg.add_argument(
         "This behavior might be removed in the future. "
     ), default="./pairs",
 )
-data_arg.add_argument("--regen_pairs", type=str2bool, default=False, help="")
+data_arg.add_argument("--regen_pairs", type=str2bool, default=True, help="")
 
 # ----------------------------------------
 # Task
@@ -156,7 +163,7 @@ train_arg.add_argument("--batch_size", type=int, default=128, help="")
 train_arg.add_argument("--pair_interval", type=int, default=1, help="")
 train_arg.add_argument("--pair_use_cache", type=str2bool,
                        default=True, help="")
-train_arg.add_argument("--max_step", type=int, default=1e7, help="")
+train_arg.add_argument("--max_step", type=int, default=1e8, help="")
 train_arg.add_argument("--optimizer", type=str, default="adam",
                        choices=["adam", "rmsprop", "sgd"],
                        help="")

@@ -126,7 +126,8 @@ class Dataset(object):
                                get_ratio_scale(self.config), 1.0,
                                int(get_patch_size(self.config)),
                                int(self.config.desc_input_size), in_dim,
-                               bPerturb, fPerturbInfo, bReturnCoords=True)
+                               bPerturb, fPerturbInfo, bReturnCoords=True,
+                               is_test=True)
 
         # Change old dataset return structure to necessary data
         x = dataset[0]
@@ -138,7 +139,7 @@ class Dataset(object):
 
         # Return the dictionary structure
         cur_data = {}
-        cur_data["patch"] = np.transpose(x, (0, 2, 3, 1)) # In NHWC
+        cur_data["patch"] = np.transpose(x, (0, 2, 3, 1))  # In NHWC
         cur_data["kps"] = coords
         cur_data["xyz"] = pos
         # Make sure that angle is a Nx1 vector

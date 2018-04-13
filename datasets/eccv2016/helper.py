@@ -38,6 +38,7 @@ import h5py  # for hdf5
 import numpy as np
 import scipy.io  # for matlab
 import six
+from time import time
 
 # dump tools
 from utils import loadh5, saveh5
@@ -252,7 +253,7 @@ def load_patches(img, kp_in, y_in, ID_in, angle_in, fRatioScale, fMaxScale,
                  nPatchSize, nDescInputSize, in_dim, bPerturb, fPerturbInfo,
                  bReturnCoords=False, nAugmentedRotations=1,
                  fAugmentRange=180.0, fAugmentCenterRandStrength=0.0,
-                 sAugmentCenterRandMethod="uniform", nPatchSizeAug=None):
+                 sAugmentCenterRandMethod="uniform", nPatchSizeAug=None, is_test=False):
     '''Loads Patches given img and list of keypoints
 
     Parameters
@@ -363,7 +364,7 @@ def load_patches(img, kp_in, y_in, ID_in, angle_in, fRatioScale, fMaxScale,
     for idx in six.moves.xrange(kp_in.shape[0]):
 
         # current kp position
-        cur_pos = apply_perturb(kp_in[idx], perturb_xyz[idx],  maxRatioScale)
+        cur_pos = apply_perturb(kp_in[idx], perturb_xyz[idx], maxRatioScale)
         cx = cur_pos[0]
         cy = cur_pos[1]
         cs = cur_pos[2]
@@ -432,8 +433,12 @@ def load_patches(img, kp_in, y_in, ID_in, angle_in, fRatioScale, fMaxScale,
             ID[idxKeep] = ID_in[idx]
             # add crot (in radians), note that we are between -2pi and 0 for
             # compatiblity
-            angle[idxKeep] = ((angle_in[idx] + crot_rad) % (2.0 * np.pi) -
-                              (2.0 * np.pi))
+            # angle[idxKeep] = crot_rad
+            if is_test:
+                angle[idxKeep] = ((angle_in[idx] + crot_rad) % (2.0 * np.pi) -
+                                  (2.0 * np.pi))
+            else:
+                angle[idxKeep] = crot_rad % (2.0 * np.pi) - (2.0 * np.pi)
 
             # Store the perturbation (center of the patch is 0,0,0)
             new_perturb_xyz = perturb_xyz[idx].copy()
@@ -614,6 +619,7 @@ def random_mine_non_kp_with_3d_blocking(img, pos_kp, scale_hist,
     all_neg_kp = None
 
     num_iter = 0
+    t_start = time()
     while neg_2_mine > 0:
 
         if neg_per_iter is None:
@@ -710,8 +716,8 @@ def random_mine_non_kp_with_3d_blocking(img, pos_kp, scale_hist,
         # pdb.set_trace()
 
         if num_iter > max_iter:
-            print('\nRan {} iterations, but could not mine {} on this image'
-                  ''.format(num_iter, neg_2_mine))
+            print('\nRan {0:d} iterations, but could not mine {1:d} on this image [{2:.02f} s.]'
+                  ''.format(num_iter, neg_2_mine, time() - t_start))
             break
 
         neg_kp = all_neg_kp[:param.dataset.nNegPerImg]
