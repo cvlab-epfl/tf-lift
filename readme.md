@@ -110,3 +110,18 @@ input.
 We found that these layers can be replaced with normal relus and spatial
 pooling without significant difference. They are removed.
 
+## Pretrained models ##
+
+We provide new models trained on the `Piccadilly' set from the ECCV paper.
+Note that they have been trained from scratch with the new framework (as
+opposed to [the theano-based framework we used at the time of the ECCV
+submission](https://github.com/cvlab-epfl/LIFT)), so there are some changes in
+the architecture and training procedure. Performance should be about on par.
+
+The files can be downloaded here:
+* [Models without rotation augmentation](http://webhome.cs.uvic.ca/~kyi/files/2018/tflift/releasea-aug.tar.gz) (run with --use_batch_norm=False --mean_std_type=dataset)
+* [Models with rotation augmentation](http://webhome.cs.uvic.ca/~kyi/files/2018/tflift/releasea-no-aug.tar.gz) (run with --use_batch_norm=False --mean_std_type=hardcoded)
+
+The models trained without rotation augmentation perform better on matching
+problems where the images are generally upright. For data with random
+rotations, use the models trained with rotation augmentation.
