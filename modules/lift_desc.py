@@ -63,8 +63,8 @@ def process(inputs, bypass, name, skip, config, is_training):
     image_summary_nhwc(name + "-input", inputs)
 
     # Import the lift_desc_sub_kernel.h5 to get the kernel file
-    script_dir = os.path.dirname(os.path.realpath(__file__))
-    sub_kernel = loadh5(script_dir + "/lift_desc_sub_kernel.h5")["kernel"]
+    # script_dir = os.path.dirname(os.path.realpath(__file__))
+    # sub_kernel = loadh5(script_dir + "/lift_desc_sub_kernel.h5")["kernel"]
 
     # activation
     if config.desc_activ == "tanh":
@@ -100,8 +100,8 @@ def process(inputs, bypass, name, skip, config, is_training):
             cur_in = batch_norm(cur_in, training=is_training)
         cur_in = activ(cur_in)
         cur_in = pool(cur_in, config.desc_pool, 2)
-        if config.use_subtractive_norm:
-            cur_in = norm_spatial_subtractive(cur_in, sub_kernel)
+        # if config.use_subtractive_norm:
+        #     cur_in = norm_spatial_subtractive(cur_in, sub_kernel)
 
     with tf.variable_scope("conv-act-pool-norm-2"):
         cur_in = conv_2d(cur_in, 6, 64, 1, "VALID")
@@ -109,8 +109,8 @@ def process(inputs, bypass, name, skip, config, is_training):
             cur_in = batch_norm(cur_in, training=is_training)
         cur_in = activ(cur_in)
         cur_in = pool(cur_in, config.desc_pool, 3)
-        if config.use_subtractive_norm:
-            cur_in = norm_spatial_subtractive(cur_in, sub_kernel)
+        # if config.use_subtractive_norm:
+        #     cur_in = norm_spatial_subtractive(cur_in, sub_kernel)
 
     with tf.variable_scope("conv-act-pool-3"):
         cur_in = conv_2d(cur_in, 5, 128, 1, "VALID")
