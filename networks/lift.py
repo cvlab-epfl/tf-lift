@@ -67,7 +67,7 @@ class Network(object):
         self.mean = {}
         self.std = {}
         # Load values if they already exist
-        if force_mean_std:
+        if force_mean_std is not None:
             self.mean = force_mean_std["mean"]
             self.std = force_mean_std["std"]
         elif self.config.mean_std_type == "hardcoded":
