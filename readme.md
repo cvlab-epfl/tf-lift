@@ -125,3 +125,7 @@ The files can be downloaded here:
 The models trained without rotation augmentation perform better on matching
 problems where the images are generally upright. For data with random
 rotations, use the models trained with rotation augmentation.
+
+## Data generation example
+
+Several people have had issues generating the training data. We have uploaded an example of what these should look like into `example`, inclusing the scale histogram files, which you're free to re-use.
