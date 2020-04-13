@@ -59,7 +59,8 @@ from flufl.lock import Lock
 #                                        random_mine_non_kp_with_3d_blocking)
 from datasets.eccv2016.helper import (load_patches,
                                       random_mine_non_kp_with_2d_distance,
-                                      random_mine_non_kp_with_3d_blocking)
+                                      random_mine_non_kp_with_3d_blocking,
+                                      get_scale_hist, get_list_of_img, createsplitindexh5file)
 from six.moves import xrange
 # from Utils.custom_types import pathConfig
 from datasets.eccv2016.custom_types import pathConfig
@@ -72,31 +73,32 @@ ratio_CPU = 0.5
 # -----------------------------------------------------------------------------
 # Dataset class
 def createDump(args):
+    # print("createDump called")
 
-    idx_jpg, jpg_file, train_data_dir, dump_data_dir, tmp_patch_dir, \
-        scale_hist, scale_hist_c, out_dim, param, queue = args
+    idx_jpg, jpg_file, train_data_dir, dump_data_dir, tmp_patch_dir, scale_hist, scale_hist_c, out_dim, param, queue = args
 
+    # print(idx_jpg)
+    # print(jpg_file)
+    # print(args)
     # queue for monitoring
     if queue is not None:
         queue.put(idx_jpg)
 
-    final_dump_file_name = tmp_patch_dir + jpg_file.replace(".jpg", ".h5")
+    final_dump_file_name = os.path.join(tmp_patch_dir,os.path.basename(jpg_file).split(".")[0]+".h5")
+    # print(final_dump_file_name)
     if not os.path.exists(final_dump_file_name):
         # load image
         bUseColorImage = getattr(param.patch, "bUseColorImage", False)
         if not bUseColorImage:
             bUseDebugImage = getattr(param.patch, "bUseDebugImage", False)
             if not bUseDebugImage:
-                img = cv2.cvtColor(cv2.imread(train_data_dir + jpg_file),
-                                   cv2.COLOR_BGR2GRAY)
+                img = cv2.cvtColor(cv2.imread(jpg_file),cv2.COLOR_BGR2GRAY)
             else:
                 # debug image contains keypoints survive the SfM
                 # pipeline (blue) and the rest (in red)
-                img = cv2.cvtColor(cv2.imread(train_data_dir + jpg_file),
-                                   cv2.COLOR_BGR2GRAY)
-                debug_jpg = train_data_dir + jpg_file.replace(
-                    ".jpg", "-kp-minsc-" + str(param.dataset.fMinKpSize) +
-                    ".jpg")
+                img = cv2.cvtColor(cv2.imread(jpg_file),cv2.COLOR_BGR2GRAY)
+                # debug_jpg = train_data_dir + jpg_file.replace(".jpg", "-kp-minsc-" + str(param.dataset.fMinKpSize) +".jpg")
+                debug_jpg = os.path.splitext(jpg_file)[0] + "-kp-minsc-" + str(param.dataset.fMinKpSize) +".jpg"
                 imgd = cv2.cvtColor(cv2.imread(debug_jpg), cv2.COLOR_BGR2GRAY)
                 img = cv2.resize(imgd, img.shape[:2][::-1])
 
@@ -109,26 +111,46 @@ def createDump(args):
         # ----------------------------------------
         # load kp data
         # Note that data is in order of [x,y,scale,angle,pointid,setid]]
+        # guessing here: pointid is the point id number for the keypoint in the two 2d image
+        # or maybe it's a unique idx for a point in a list of all points?
+        # of maybe its the index of a point for all points in a set?(I think it's this last one, maybe)
+        # setid is the id num for the pair which is created from the image keypoints (this would keep a uniform )
 
         # For positive: select randomly from "valid_keypoints"
-        pos_kp_file_name = train_data_dir + jpg_file.replace(
-            ".jpg", "-kp-minsc-" + str(param.dataset.fMinKpSize) + ".h5")
+        pos_kp_file_name = jpg_file.replace(".jpg", "-kp-minsc-" + str(param.dataset.fMinKpSize) + ".h5")
+        # print(pos_kp_file_name)
         with h5py.File(pos_kp_file_name, "r") as h5file:
-            sfm_kp = np.asarray(h5file["valid_keypoints"], dtype="float")
-            non_sfm_kp = np.asarray(h5file["other_keypoints"], dtype="float")
+            sfm_kp = h5file["valid_keypoints"][()]
+            non_sfm_kp = h5file["other_keypoints"][()]
             # add two dummy fields to non_sfm since they don"t have id
-            # and group. THis means pointid,setid are set to 1 for non_sfm_kp
-            non_sfm_kp = np.concatenate(
-                [non_sfm_kp, -np.ones((non_sfm_kp.shape[0], 2))],
-                axis=1
-            )
+            # and group. THis means pointid,setid are set to -1 for non_sfm_kp
+            # non_sfm_kp = np.concatenate([non_sfm_kp, -np.ones((non_sfm_kp.shape[0], 2))],axis=1)
 
-        pos_kp = np.concatenate((sfm_kp, np.ones((sfm_kp.shape[0], 1),
-                                                 dtype="float")), axis=1)
-        # Select subset for positives (assuming we have same coordinates for
-        # all image)
-        dump_file_name = dump_data_dir + jpg_file.replace(".jpg",
-                                                          "_idxPosSel.h5")
+        # if there are no keypoints which were leveraged in SFM
+        if(len(sfm_kp) == 0):
+            sfm_kp = np.empty([0, 6])
+
+        if(len(non_sfm_kp) == 0):
+            non_sfm_kp = np.empty([0, 6])
+            # return None
+
+        # print(sfm_kp)
+        # print(type(sfm_kp))
+        # print(sfm_kp.shape)
+        # print(non_sfm_kp)
+        # print(type(non_sfm_kp))
+        # print(non_sfm_kp.shape)
+
+        pos_kp = np.concatenate((sfm_kp, np.ones((sfm_kp.shape[0], 1),dtype="float")), axis=1)
+        if(len(sfm_kp) == 0):
+            pos_kp = pos_kp[1:, :]
+
+        if(len(non_sfm_kp) == 0):
+            non_sfm_kp = non_sfm_kp[1:, :]
+
+        # Select subset for positives (assuming we have same coordinates for all image)
+        # dump_file_name = dump_data_dir + jpg_file.replace(".jpg","_idxPosSel.h5")
+        dump_file_name = os.path.join(dump_data_dir, os.path.basename(jpg_file).split(".")[0]+"_idxPosSel.h5")
 
         # if dump file not exist, create it; otherwise load it
         if not os.path.exists(dump_file_name):
@@ -140,11 +162,13 @@ def createDump(args):
                 pos_2_keep = min(pos_2_keep, param.dataset.nPosPerImg)
             idxPosSel = idxPosShuffle[:pos_2_keep]  # shuffle the points
             to_save = {"saveval": idxPosSel}
+            # print(to_save)
             saveh5(to_save, dump_file_name)
         else:
             to_load = loadh5(dump_file_name)
             idxPosSel = to_load["saveval"]
         pos_kp = pos_kp[idxPosSel]
+        # print(pos_kp)
 
         # negative sampling:
         #
@@ -155,26 +179,52 @@ def createDump(args):
         # windows is larger than a threshold, it will be rejected as a negative
         # pair (because it shares too much common regions..). In this step, we
         # concatenate sfm_kp and non_sfm_kp to form keypoint class.
-        neg_mine_method = getattr(param.patch, "sNegMineMethod",
-                                  "use_only_SfM_points")
+        neg_mine_method = getattr(param.patch, "sNegMineMethod","use_only_SfM_points")
         if neg_mine_method == "use_only_SfM_points":
+            # print("mining sfm points...")
+            # exit()
             # where is
-            neg_kp = random_mine_non_kp_with_2d_distance(
-                img, sfm_kp, scale_hist, scale_hist_c, param)
+            neg_kp = random_mine_non_kp_with_2d_distance(img, sfm_kp, scale_hist, scale_hist_c, param)
         elif neg_mine_method == "use_all_SIFT_points":
+            # print("mining SIFT  points...")
+            # exit()
             max_iter = getattr(param.patch, "nMaxRandomNegMineIter", 100)
-            sift_kp = np.concatenate([sfm_kp, non_sfm_kp], axis=0)
-            neg_kp = random_mine_non_kp_with_3d_blocking(
-                img, sift_kp, scale_hist, scale_hist_c, param,
-                max_iter=max_iter)
+
+            # print(sfm_kp)
+            # print(type(sfm_kp))
+            # print(sfm_kp.shape)
+            # print(non_sfm_kp)
+            # print(type(non_sfm_kp))
+            # print(non_sfm_kp.shape)
+
+
+            # print(pos_kp)
+            # print(type(pos_kp))
+            # print(pos_kp.shape)
+
+            try:
+                sift_kp = np.concatenate([sfm_kp, non_sfm_kp], axis=0)
+                neg_kp = random_mine_non_kp_with_3d_blocking(img, sift_kp, scale_hist, scale_hist_c, param,max_iter=max_iter)
+                # neg_kp = random_mine_non_kp_with_3d_blocking(img, sift_kp, scale_hist, scale_hist_c, param, neg_per_iter = 10, max_iter=max_iter)
+            except ValueError as err:
+                # print(err)
+                # print("Possibly no non_sfm_keypoints?")
+                neg_kp = np.empty([0, 6])
+
         else:
-            raise ValueError("Mining method {} is not supported!"
-                             "".format(neg_mine_method))
+            raise ValueError("Mining method {} is not supported!".format(neg_mine_method))
         # add another dim indicating good or bad
-        neg_kp = np.concatenate((neg_kp, np.zeros((len(neg_kp), 1),
-                                                  dtype="float")), axis=1)
+        neg_kp = np.concatenate((neg_kp, np.zeros((len(neg_kp), 1),dtype="float")), axis=1)
         # concatenate negative and positives
+        # print(pos_kp)
+        # print(type(pos_kp))
+        # print(pos_kp.shape)
+        # print(neg_kp)
+        # print(type(neg_kp))
+        # print(neg_kp.shape)
+
         kp = np.concatenate((pos_kp, neg_kp), axis=0)
+        # print(kp)
 
         # Retrive target values, 1 for pos and 0 for neg
         y = kp[:, 6]
@@ -294,16 +344,16 @@ class data_obj(object):
 
         # Read from pathconf
         # Original implementation
-        train_data_dir = pathconf.dataset
-        dump_data_dir = pathconf.train_dump
-        dump_patch_dir = pathconf.patch_dump
+        train_data_dir = os.path.normpath(pathconf.dataset)
+        dump_data_dir = os.path.normpath(pathconf.train_dump)
+        dump_patch_dir = os.path.normpath(pathconf.patch_dump)
         # local (or volatile) copy of the dump data
-        tmp_patch_dir = pathconf.volatile_patch_dump
+        tmp_patch_dir = os.path.normpath(pathconf.volatile_patch_dump)
 
-        print("train_data_dir = {}".format(train_data_dir))
-        print("dump_data_dir = {}".format(dump_data_dir))
-        print("dump_patch_dir = {}".format(dump_patch_dir))
-        print("tmp_patch_dir = {}".format(tmp_patch_dir))
+        # print("train_data_dir = {}".format(train_data_dir))
+        # print("dump_data_dir = {}".format(dump_data_dir))
+        # print("dump_patch_dir = {}".format(dump_patch_dir))
+        # print("tmp_patch_dir = {}".format(tmp_patch_dir))
 
         if not os.path.exists(dump_data_dir):
             os.makedirs(dump_data_dir)
@@ -346,20 +396,24 @@ class data_obj(object):
         else:
             print("Unknown operating system, lock unavailable")
 
+        # if the large training data file does not exist
         if not os.path.exists(big_file_name):
-
-            if not os.path.exists(dump_patch_dir + mode + "-data.h5"):
+            print("big data file does not exist...")
+            # if the patch-mode-data file does not exist
+            if not os.path.exists(os.path.join(dump_patch_dir,mode + "-data.h5")):
+                print("{0} does not exist...".format(os.path.join(dump_patch_dir,mode + "-data.h5")))
 
                 # Read scale histogram
-                hist_file = h5py.File(train_data_dir +
-                                      "scales-histogram-minsc-" +
-                                      str(param.dataset.fMinKpSize) + ".h5",
-                                      "r")
-                scale_hist = np.asarray(hist_file["histogram_bins"]).flatten()
+                hist_file_path = train_data_dir +"scales-histogram-minsc-" + str(param.dataset.fMinKpSize) + ".h5"
+                if not os.path.exists(hist_file_path):
+                    print("Hist file does not exist, creating...")
+                    get_scale_hist(train_data_dir, param)
+                # print("Loading hist file...")
+                hist_file = h5py.File(hist_file_path,"r")
+                scale_hist = np.asarray(hist_file["histogram_bins"], dtype=float).flatten()
+                # print(scale_hist)
                 scale_hist /= np.sum(scale_hist)
-                scale_hist_c = np.asarray(
-                    hist_file["histogram_centers"]
-                ).flatten()
+                scale_hist_c = np.asarray(hist_file["histogram_centers"]).flatten()
 
                 # Read list of images from split files
                 split_name = ""
@@ -367,23 +421,34 @@ class data_obj(object):
                 split_name += str(param.dataset.nValidPercent) + "-"
                 split_name += str(param.dataset.nTestPercent) + "-"
                 if mode == "train":
-                    split_name += "train-"
+                    # split_name += "train-"
+                    split_name += "train"
                 elif mode == "valid":
-                    split_name += "val-"
+                    # split_name += "val-"
+                    split_name += "val"
                 elif mode == "test":
-                    split_name += "test-"
-                split_file_name = train_data_dir + "split-" \
-                    + split_name + "minsc-" \
-                    + str(param.dataset.fMinKpSize) + ".h.txt"
-                list_jpg_file = []
-                for file_name in list(
-                        np.loadtxt(split_file_name, dtype=bytes)
-                ):
-                    list_jpg_file += [
-                        file_name.decode("utf-8").replace(
-                            "-kp-minsc-" + str(param.dataset.fMinKpSize),
-                            ".jpg")
-                    ]
+                    # split_name += "test-"
+                    split_name += "test"
+                print("split_name: {}".format(split_name))
+                # split_file_name = train_data_dir + "split-" \
+                #     + split_name + "minsc-" \
+                #     + str(param.dataset.fMinKpSize) + ".h.txt"
+                # split_file_name = "split-" + split_name + "minsc-" + str(param.dataset.fMinKpSize) + ".h.txt"
+                split_file_name = "split-" + split_name + ".txt"
+                split_file_name = train_data_dir + split_file_name
+                # split_file_name = os.path.join(train_data_dir, split_file_name)
+                print("split_file_name: {}".format(split_file_name))
+
+                if not os.path.exists(split_file_name):
+                    print("split_file_name does not exist...")
+                    list_jpg_file = get_list_of_img(train_data_dir, dump_data_dir, param, mode)
+                else:
+                    print("split_file_name exists...")
+                    list_jpg_file = []
+                    for file_name in list(np.loadtxt(split_file_name, dtype=bytes)):
+                        list_jpg_file += [file_name.decode("utf-8").replace("-kp-minsc-" + str(param.dataset.fMinKpSize),".jpg")]
+
+
 
                 # -------------------------------------------------
                 # Create dumps in parallel
@@ -397,8 +462,9 @@ class data_obj(object):
                                          scale_hist, scale_hist_c,
                                          self.out_dim, param)
 
-                # if true, use multi thread, otherwise use only single thread
-                if True:
+                # # if true, use multi thread, otherwise use only single thread
+                prod = True
+                if prod:
                     number_of_process = int(ratio_CPU * mp.cpu_count())
                     pool = mp.Pool(processes=number_of_process)
                     manager = mp.Manager()
@@ -407,16 +473,16 @@ class data_obj(object):
                         pool_arg[idx_jpg] = pool_arg[idx_jpg] + (queue,)
                     # map async
                     pool_res = pool.map_async(createDump, pool_arg)
+                    # pool_res = pool.map_async(createDump, pool_arg, chunksize = int(len(list_jpg_file)/(number_of_process* mp.cpu_count())))
                     # monitor loop
                     while True:
                         if pool_res.ready():
-                            # print("")
+                            print("Pool_res ready?")
                             break
                         else:
                             size = queue.qsize()
-                            print("\r -- " + mode + ": Processing image "
-                                  "{}/{}".format(size, len(list_jpg_file)),
-                                  end="")
+                            print("\r -- " + mode + ": Processing image {}/{}".format(size, len(list_jpg_file)),end="")
+                            # print(list_jpg_file[size])
                             sys.stdout.flush()
                             time.sleep(1)
                     pool.close()
@@ -437,7 +503,7 @@ class data_obj(object):
                 # -------------------------------------------------
 
                 # # --------------------
-                # # use single thread for simplify debugging
+                # use single thread for simplify debugging
                 # for idx_jpg in six.moves.xrange(len(list_jpg_file)):
                 #     pool_arg[idx_jpg] = pool_arg[idx_jpg] + (None,)
                 # for idx_jpg in six.moves.xrange(len(list_jpg_file)):
@@ -464,9 +530,21 @@ class data_obj(object):
                     id_key = "indices_val"
                 elif mode == "test":
                     id_key = "indices_test"
+                # print(id_file_name)
+                try:
+                    with h5py.File(id_file_name, "r") as id_file:
+                        id_2_keep = np.asarray(id_file[id_key])
+                except OSError as err:
+                    print(err)
+                    print("Creating idx file...")
+                    # if "unable to open file" in err:
+                    createsplitindexh5file(id_file_name,train_data_dir, param)
+                    with h5py.File(id_file_name, "r") as id_file:
+                        id_2_keep = np.asarray(id_file[id_key])
+                        # print(id_2_keep)
+                        print("{0} has {1} sfmid points to keep...".format(id_key, len(id_2_keep)))
+                # exit()
 
-                with h5py.File(id_file_name, "r") as id_file:
-                    id_2_keep = np.asarray(id_file[id_key])
 
                 # ind_2_keep = np.in1d(dataset[2], id_2_keep)
                 # ind_2_keep += dataset[2] < 0
@@ -475,6 +553,8 @@ class data_obj(object):
 #                pdb.set_trace() # for tracking of the dataset
 
                 num_valid = 0
+                # print(len(list_jpg_file))
+                # exit()
                 for idx_jpg in six.moves.xrange(len(list_jpg_file)):
 
                     jpg_file = list_jpg_file[idx_jpg]
@@ -486,27 +566,40 @@ class data_obj(object):
                     sys.stdout.flush()
 
                     # Load created dump
-                    final_dump_file_name = tmp_patch_dir \
-                        + jpg_file.replace(".jpg", ".h5")
+                    # final_dump_file_name = tmp_patch_dir + jpg_file.replace(".jpg", ".h5")
+                    # print(tmp_patch_dir)
+                    # print(jpg_file)
+                    final_dump_file_name = tmp_patch_dir + "\\" + os.path.basename(jpg_file)[:-4] + ".h5"
+                    # print(final_dump_file_name)
                     # Use loadh5 and turn it back to original cur_data_set
-                    with h5py.File(final_dump_file_name, "r") as dump_file:
-                        cur_ids = dump_file["2"].value
+                    try:
+                        with h5py.File(final_dump_file_name, "r") as dump_file:
+                            # print(list(dump_file.keys()))
+                            cur_ids = dump_file["2"].value
+                            # kps = dump_file["valid_keypoints"][()]
+                            # cur_ids = np.asarray(kps[:, 4])
+                            # print(cur_ids)
+                    except OSError as err:
+                        # print(err)
+                        continue
 
                     # Find cur valid by looking at id_2_keep
                     cur_valid = np.in1d(cur_ids, id_2_keep)
+                    # print(cur_valid)
                     # Add all negative labels as valid (neg data)
                     cur_valid += cur_ids < 0
 
                     # Sum it up
                     num_valid += np.sum(cur_valid)
+                    # print(num_valid)
+                    
 
                 print("\n -- " + mode + ": "
                       "Found {} valid data points from {} files"
                       "".format(num_valid, len(list_jpg_file)))
 
                 # Get the first data to simply check the shape
-                tmp_dump_file_name = tmp_patch_dir \
-                    + list_jpg_file[0].replace(".jpg", ".h5")
+                tmp_dump_file_name = tmp_patch_dir + "\\" + os.path.basename(list_jpg_file[-1])[:-4] + ".h5"
                 with h5py.File(tmp_dump_file_name, "r") as dump_file:
                     dataset_shape = []
                     dataset_type = []
@@ -542,24 +635,31 @@ class data_obj(object):
                         sys.stdout.flush()
 
                         # Load created dump
-                        final_dump_file_name = tmp_patch_dir \
-                            + jpg_file.replace(".jpg", ".h5")
+                        # final_dump_file_name = tmp_patch_dir + jpg_file.replace(".jpg", ".h5")
+                        final_dump_file_name = tmp_patch_dir + "\\" + os.path.basename(jpg_file)[:-4] + ".h5"
+                        # print(final_dump_file_name)
                         # Use loadh5 and turn it back to original cur_data_set
-                        tmpdict = loadh5(final_dump_file_name)
-                        cur_data_set = tuple([
-                            tmpdict[str(_idx)] for _idx in
-                            range(len(tmpdict.keys()))
-                        ])
-                        # Find cur valid by looking at id_2_keep
-                        cur_valid = np.in1d(cur_data_set[2], id_2_keep)
-                        # Add all negative labels as valid (neg data)
-                        cur_valid += cur_data_set[2] < 0
-                        for __i in six.moves.xrange(len(dataset_shape)):
-                            big_file[name_list[__i]][
-                                save_base:save_base + np.sum(cur_valid)
-                            ] = cur_data_set[__i][cur_valid]
-                        # Move base to the next chunk
-                        save_base += np.sum(cur_valid)
+                        try:
+                            tmpdict = loadh5(final_dump_file_name)
+                            cur_data_set = tuple([
+                                tmpdict[str(_idx)] for _idx in
+                                range(len(tmpdict.keys()))
+                            ])
+                            # Find cur valid by looking at id_2_keep
+                            cur_valid = np.in1d(cur_data_set[2], id_2_keep)
+                            # Add all negative labels as valid (neg data)
+                            cur_valid += cur_data_set[2] < 0
+                            for __i in six.moves.xrange(len(dataset_shape)):
+                                big_file[name_list[__i]][
+                                    save_base:save_base + np.sum(cur_valid)
+                                ] = cur_data_set[__i][cur_valid]
+                            # Move base to the next chunk
+                            save_base += np.sum(cur_valid)
+                        except OSError as err:
+                            # print(err)
+                            # print("{0} skipped due to invalidity...".format(final_dump_file_name))
+                            # sys.stdout.flush()
+                            continue
 
                     # Assert that we saved all
                     assert save_base == num_valid
@@ -581,9 +681,13 @@ class data_obj(object):
                     sys.stdout.flush()
 
                     # Delete dump
-                    final_dump_file_name = tmp_patch_dir \
-                        + jpg_file.replace(".jpg", ".h5")
-                    os.remove(final_dump_file_name)
+                    # final_dump_file_name = tmp_patch_dir + jpg_file.replace(".jpg", ".h5")
+                    final_dump_file_name = tmp_patch_dir + "\\" + os.path.basename(jpg_file)[:-4] + ".h5"
+                    try:
+                        os.remove(final_dump_file_name)
+                    except FileNotFoundError as err:
+                        pass
+
 
                 print("\r -- " + mode + ": "
                       "Cleaned up dumps! "
