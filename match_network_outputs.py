@@ -43,10 +43,10 @@ def main(args):
 
 if __name__ == "__main__":
 	ap = argparse.ArgumentParser()
-	ap.add_argument("a", help="path of first image file", default="P:/neuralnetworkdata/ECCV/piccadilly/2382421_04936eef53_o.jpg")
-	ap.add_argument("ah", help="path of first image keypoints file", default="P:/neuralnetworkdata/ECCV/piccadilly/2382421_04936eef53_o.jpg")
-	ap.add_argument("b", help="path of second image file", default="P:/neuralnetworkdata/ECCV/piccadilly/2382421_04936eef53_o.jpg")
-	ap.add_argument("bh", help="path of second image keypoints file", default="P:/neuralnetworkdata/ECCV/piccadilly/2382421_04936eef53_o.jpg")
+	ap.add_argument("a", help="path of first image file")
+	ap.add_argument("ah", help="path of first image keypoints file")
+	ap.add_argument("b", help="path of second image file")
+	ap.add_argument("bh", help="path of second image keypoints file")
 	# ap.add_argument('-m',"--modeldir", help="directory containing models to use in testing", default="release-aug")
 
 	# ap.add_argument('-d',"--dir", help="name of directory which holds files to train on")
