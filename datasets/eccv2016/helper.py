@@ -31,7 +31,7 @@
 
 from __future__ import print_function
 
-import os
+import os,math
 
 import cv2
 import h5py  # for hdf5
@@ -39,6 +39,7 @@ import numpy as np
 import scipy.io  # for matlab
 import six
 from time import time
+from imutils import paths
 
 # dump tools
 from utils import loadh5, saveh5
@@ -710,6 +711,7 @@ def random_mine_non_kp_with_3d_blocking(img, pos_kp, scale_hist,
 
         # update number of iterations
         num_iter += 1
+        # print(":{}".format(num_iter))
 
         # # if num_iter == 1 and len(all_neg_kp) == 0:
         # import pdb
@@ -718,11 +720,14 @@ def random_mine_non_kp_with_3d_blocking(img, pos_kp, scale_hist,
         if num_iter > max_iter:
             print('\nRan {0:d} iterations, but could not mine {1:d} on this image [{2:.02f} s.]'
                   ''.format(num_iter, neg_2_mine, time() - t_start))
-            break
+            # print(all_neg_kp)
+            # break
+            neg_kp = all_neg_kp[:param.dataset.nNegPerImg]
+            return neg_kp
 
         neg_kp = all_neg_kp[:param.dataset.nNegPerImg]
 
-    return neg_kp
+        return neg_kp
 
 
 def get_list_of_img(train_data_dir, dump_data_dir, param, mode):
@@ -733,14 +738,17 @@ def get_list_of_img(train_data_dir, dump_data_dir, param, mode):
     split_prefix += str(param.dataset.nValidPercent) + '-'
     split_prefix += str(param.dataset.nTestPercent) + '-'
 
+    print(split_prefix + mode + '.txt')
+
     # If it does not exist, create one
     if not os.path.exists(split_prefix + mode + '.txt'):
 
         # Read list of images
         list_png_file = []
-        for files in os.listdir(train_data_dir):
-            if files.endswith(".png"):
-                list_png_file = list_png_file + [files]
+        # for files in os.listdir(train_data_dir):
+            # if files.endswith(".png"):
+            #     list_png_file = list_png_file + [files]
+        list_png_file = list(paths.list_images(train_data_dir))
 
         # Shuffle the image list
         if not os.path.exists(dump_data_dir + 'permute_png_idx.h5'):
@@ -795,43 +803,201 @@ def get_list_of_img(train_data_dir, dump_data_dir, param, mode):
 
 
 def get_scale_hist(train_data_dir, param):
+    kp_file_suffix = "-kp-minsc-2.0.h5"
 
     # Check if scale histogram file exists
-    hist_file_name = train_data_dir + 'scales-histogram-minsc-' \
-        + str(param.dataset.fMinKpSize) + '.h5'
+    hist_file_name = train_data_dir + 'scales-histogram-minsc-' + str(param.dataset.fMinKpSize) + '.h5'
+    print(hist_file_name)
     if not os.path.exists(hist_file_name):
 
         # read all positive keypoint scales
         list_png_file = []
-        for files in os.listdir(train_data_dir):
-            if files.endswith(".png"):
-                list_png_file = list_png_file + [files]
+        # for files in os.listdir(train_data_dir):
+        #     if files.endswith(".png"):
+        #         list_png_file = list_png_file + [files]
+        list_png_file = list(paths.list_images(train_data_dir))
+
+        # all_scales = np.array(dtype=float)
         all_scales = []
         for png_file in list_png_file:
-            kp_file_name = train_data_dir + png_file.replace('.png', '_P.mat')
-            cur_pos_kp = scipy.io.loadmat(kp_file_name)['TFeatures']
-            cur_pos_kp = np.asarray(cur_pos_kp, dtype='float')
-            all_scales += [cur_pos_kp[5, :].flatten()]
-        all_scales = np.concatenate(all_scales)
+            # print(png_file)
+            # kp_file_name = train_data_dir + png_file.replace('.png', '_P.mat')
+            kp_file_name = png_file.replace('.png', '_P.mat')
+            kp_file_name = png_file.replace('.jpg', '_P.mat')
+            # print(kp_file_name)
+            # if a matlab keypointed file exists:
+            if os.path.exists(kp_file_name):
+                print("matlab kp file exists")
+                cur_pos_kp = scipy.io.loadmat(kp_file_name)['TFeatures']
+                cur_pos_kp = np.asarray(cur_pos_kp, dtype='float')
+                all_scales += [cur_pos_kp[5, :].flatten()]
+            # if not
+            else:
+                # print("trying to read ascii kp file...")
+                # look for a Lowe's ASCII keypoint file
+                # ascci_kp_file = os.path.splitext(png_file)[0]+".sift_bak"
+                # print(ascci_kp_file)
+                # cur_pos_kp = readAsciiSiftFile(ascci_kp_file)[0]
+                kpfilename = os.path.splitext(png_file)[0] + kp_file_suffix
+                # print(kpfilename)
+                with h5py.File(kpfilename, "r") as kpfile:
+                    kps = kpfile['valid_keypoints'][()]
+                    cur_pos_kp = [cv2.KeyPoint(x[0], x[1], x[2], x[3], int(x[4]), int(x[5])) for x in kps]
+                # print(cur_pos_kp)
+                # print(type(cur_pos_kp))
+                # extract a 1D array of kp scale values
+                all_scales += [x.size for x in cur_pos_kp]
+                # all_scales += [cur_pos_kp[2, :].flatten()]
+        # print(len(all_scales))
+
+        try:
+            all_scales = np.concatenate(all_scales)
+        except ValueError as err:
+            print(err)
+            pass
 
         # make histogram
         hist, bin_edges = np.histogram(all_scales, bins=100)
         hist_c = (bin_edges[1:] + bin_edges[:-1]) * 0.5
 
         # save to h5 file
+        print("Saving hist file...")
         with h5py.File(hist_file_name, 'w') as hist_file:
             hist_file['all_scales'] = all_scales
             hist_file['histogram_bins'] = hist
             hist_file['histogram_centers'] = hist_c
 
     # Load from the histogram file
+    print("Reading hist file...")
     with h5py.File(hist_file_name, 'r') as hist_file:
-        scale_hist = np.asarray(hist_file['histogram_bins'],
-                                dtype=float).flatten()
+        scale_hist = np.asarray(hist_file['histogram_bins'],dtype=float).flatten()
+        # print(scale_hist)
         scale_hist /= np.sum(scale_hist)
+        # print(scale_hist)
         scale_hist_c = np.asarray(hist_file['histogram_centers']).flatten()
 
     return scale_hist, scale_hist_c
 
 #
 # helper.py ends here
+
+def readAsciiSiftFile(filepath):
+    # print(filepath)
+    with open(filepath, "r") as imgsiftfile:
+        lines = imgsiftfile.readlines()
+        # drop unneccessary header line
+        lines = lines[1:]
+        # the second line and every eighth line after are feature details
+        kps = []
+        # TODO: should desc and temp be nparrs?
+        desc = []
+        mark = 0
+        temp = []
+        for line in lines:
+            vals = line.lstrip().split(" ")
+            if mark is 0:#if mark is for a header line for a keypoint
+                kp = cv2.KeyPoint(float(vals[1]), float(vals[0]), float(vals[2]), math.degrees(float(vals[3])))
+                kps.append(kp)
+            elif mark > 0:
+                # each line inbetween is a set of the vector values for the descriptor
+                # concatenate the lines of vector values into a temporary array
+                temp += list(map(int, vals))
+
+            if mark is 7:
+                # TODO: convert array to nparr?
+                desc.append(np.asarray(temp))
+                temp = []
+                mark = 0
+            else:
+                mark +=1
+
+        # print(kps)
+
+    return np.asarray(kps), np.asarray(desc)
+
+
+def createsplitindexh5file(idx_file_name, train_data_dir, param):
+    import pandas as pd
+    from pprint import pprint
+
+    # idx_file_name: name of file to write
+    # train_data_dir: directory of image kp_minsc h5 files created with convert_vsfm_to_h5.py
+
+    split_prefix = train_data_dir + 'split-'
+    split_prefix += str(param.dataset.nTrainPercent) + '-'
+    split_prefix += str(param.dataset.nValidPercent) + '-'
+    split_prefix += str(param.dataset.nTestPercent) + '-'
+
+    # get a dict of file names in each set
+    print("Getting file set splits...")
+
+    keyedsets = {"train":0, "valid":1,"test":2}
+    filesets = {}
+    for suffix in keyedsets:
+        split_file_name = split_prefix+suffix+".txt"
+        setname = suffix.split(".")[0] 
+        filesets[setname] = {"files":[], "records":{}}
+        for idx,file_name in enumerate(list(np.loadtxt(split_file_name, dtype=bytes))):
+            filesets[setname]["files"] += [(idx,file_name.decode("utf-8"))]
+
+    print(filesets)
+    kp_file_suffix = "-kp-minsc-2.0.h5"
+
+    print("Reading kp files...")
+    # for each set of files
+    data = []
+    for k in filesets:
+        # for each file in the set
+        for f in filesets[k]['files']:
+            kp_file = os.path.splitext(f[1])[0] + kp_file_suffix
+            print(kp_file)
+            with h5py.File(kp_file, "r") as infile:
+                filesets[k]['records'][os.path.basename(kp_file)] = np.asarray(infile["valid_keypoints"])
+                for r in filesets[k]['records'][os.path.basename(kp_file)]:
+                    record = list(r)[4:]
+                    # print(record)
+                    # print(keyedsets,k)
+                    # print(keyedsets[k])
+                    record.append(keyedsets[k])
+                    # print(record)
+                    # exit()
+                    data.append(record)
+                    # print(record)
+                    # filesets[k]['records'][os.path.basename(kp_file)][r] = record
+
+    df = pd.DataFrame(data, columns=["sfmptid", "modelid", "datasetid"])
+    # print(df)
+    setdict = {k:v for k,v in df.groupby("datasetid")}
+    # pprint(setdict)
+
+    # df_train = setdict[0].loc[~setdict[0][['sfmptid','modelid']].isin(setdict[1][['sfmptid','modelid']]) & ~setdict[0][['sfmptid','modelid']].isin(setdict[2][['sfmptid','modelid']])]
+    # df_valid = setdict[1].loc[~setdict[1]['sfmptid'].isin(setdict[0]['sfmptid']) & ~setdict[1]['sfmptid'].isin(setdict[2]['sfmptid'])]
+    # df_test = setdict[2].loc[~setdict[2]['sfmptid'].isin(setdict[1]['sfmptid']) & ~setdict[2]['sfmptid'].isin(setdict[0]['sfmptid'])]
+
+    train_idx = pd.MultiIndex.from_arrays([setdict[0][col] for col in ["sfmptid","modelid"]])
+    val_idx = pd.MultiIndex.from_arrays([setdict[1][col] for col in ["sfmptid","modelid"]])
+    test_idx = pd.MultiIndex.from_arrays([setdict[2][col] for col in ["sfmptid","modelid"]])    
+
+    df_train = setdict[0].loc[~train_idx.isin(val_idx) & ~train_idx.isin(test_idx)]
+    df_valid = setdict[1].loc[~val_idx.isin(train_idx) & ~val_idx.isin(test_idx)]
+    df_test = setdict[2].loc[~test_idx.isin(val_idx) & ~test_idx.isin(train_idx)]
+
+    # print(df_train)
+    # print(df_train.values[:,0:2])
+    # print(df_valid)
+    # print(df_test)
+
+    print("Writing {0}".format(idx_file_name))
+    with h5py.File(idx_file_name, "w") as outfile:
+        outfile['indices_train'] = df_train.values[:, 0:2]
+        outfile['indices_val'] = df_valid.values[:, 0:2]
+        outfile['indices_test'] = df_test.values[:, 0:2]
+
+
+
+    
+
+
+
+
+

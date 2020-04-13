@@ -7,13 +7,15 @@
 Python Version : 3
 OpenCV Version : 3
 
-You'll need to install the dependencies, something like the following:
+The base dependencies in Python3 are :
 
 ```
-pip install numpy h5py tensorflow tensorflow-gpu
+pip install numpy h5py tensorflow=1.4.0 tensorflow-gpu=1.4.0
 
 ```
 We will later provide a requirements.txt for you to use with `pip`.
+
+If working with an Anaconda environment on Windows, you can create the environment from the `tf-lift-env.yml` file or the `tfliftspec.txt` file.
 
 Also, you need to setup your work directories. Edit the `config.py` for a
 convenient default argument setting. See help for more information on what the
@@ -34,23 +36,25 @@ Note: this will save the logs at `logs/main.py---task=train---subtask=desc`. If
 you don't want this behavior, you can also add `--logdir=logs/test` in the
 command line argument, for example.
 
+To train with specific checkpoints for performance evaluation, you can run the `run_iteration_blocks.py` script. This will checkpoint the training process at values specified in the script, using the values from each checkpoint to seed the following runs.
+
 ### Testing ###
 
-Testing is even more simple, just provide the input image location, the output
-file name, keypoint file name (for ori and desc). For example, the following
+To run test passes on images, call the `run_test_pass_on_image.py` script. For example, the following
 command will run the entire pipeline for `image1.jpg`, using the model at `logs/test`.
 
 ```
-python main.py --task=test --subtask=kp --logdir=logs/test --test_img_file=image1.jpg \
-  --test_out_file=image1_kp.txt
-python main.py --task=test --subtask=ori --logdir=logs/test --test_img_file=image1.jpg \
-  --test_out_file=image1_ori.txt --test_kp_file=image1_kp.txt
-python main.py --task=test --subtask=desc --logdir=logs/test --test_img_file=image1.jpg \
-  --test_out_file=image1_desc.h5 --test_kp_file=image1_ori.txt
+run_test_pass_on_image.py -i image1.jpg -m logs/test
+run_test_pass_on_image.py -i image2.jpg -m logs/test
 ```
 
 Note: when trying to load the model, it will always look for the `joint`
 trained model first, and fall back to the subtask it is trying to test for.
+
+Then to evaluate the results, call the `match_network_outputs.py` script:
+```
+match_network_outputs.py image1 image1.h5 image2 image2.h5
+```
 
 ## More notes on training ##
 
@@ -112,7 +116,7 @@ pooling without significant difference. They are removed.
 
 ## Pretrained models ##
 
-We provide new models trained on the `Piccadilly' set from the ECCV paper.
+We provide new models trained on the `Piccadilly` set from the ECCV paper.
 Note that they have been trained from scratch with the new framework (as
 opposed to [the theano-based framework we used at the time of the ECCV
 submission](https://github.com/cvlab-epfl/LIFT)), so there are some changes in
@@ -125,7 +129,3 @@ The files can be downloaded here:
 The models trained without rotation augmentation perform better on matching
 problems where the images are generally upright. For data with random
 rotations, use the models trained with rotation augmentation.
-
-## Data generation example
-
-Several people have had issues generating the training data. We have uploaded an example of what these should look like into `example`, inclusing the scale histogram files, which you're free to re-use.
