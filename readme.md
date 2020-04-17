@@ -21,15 +21,27 @@ Also, you need to setup your work directories. Edit the `config.py` for a
 convenient default argument setting. See help for more information on what the
 configurations do.
 
+### Pre-Processing ###
+
+1. Download a dataset from: http://www.cs.cornell.edu/projects/1dsfm/. The LIFT paper uses the Piccadilly and Roman Forum datasets separately.
+2. Extract it somewhere.
+3. Call: `VisualSFM.exe` pointed at the directory which contains the extracted images.
+	- Calling the VSFM GUI ensures CUDA usage.
+4. Call: `python convert_asift_vsfm_to_h5.py` (help will explain args)
+
+
 ### Training ###
 
 `main.py` is the entry point for all your needs. Simply define the task you
 want to do, the where to save the results (logs) and the training subtask you
 want to perform.
 
-For example, to train the descriptor
+For example, to train the keypoint descriptor, then orientation, then detector, and then to run the joint trainer:
 ```
 python main.py --task=train --subtask=desc
+python main.py --task=train --subtask=ori
+python main.py --task=train --subtask=kp
+python main.py --task=train --subtask=joint
 ```
 
 Note: this will save the logs at `logs/main.py---task=train---subtask=desc`. If
