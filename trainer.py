@@ -47,7 +47,7 @@ from utils import get_hard_batch, restore_network, save_network
 class Trainer(object):
     """The Trainer Class
 
-    LATER: Remove all unecessary "dictionarization"
+    LATER: Remove all unnecessary "dictionarization"
 
     """
 
